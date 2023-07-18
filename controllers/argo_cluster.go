@@ -16,6 +16,8 @@ import (
 var (
 	// ArgoNamespace represents the Namespace that hold ArgoCluster secrets.
 	ArgoNamespace string
+	ArgoEndpoint string
+	ArgoRemote bool
 )
 
 // GetArgoCommonLabels holds a map of labels that reconciled objects must have.

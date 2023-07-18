@@ -9,7 +9,7 @@ GOBUILD_OPTS = -ldflags="-s -w -X ${PROJECT}/cmd.Version=${VERSION} -X ${PROJECT
 GO_IMAGE = "golang:1.20-alpine"
 GO_IMAGE_CI = "golangci/golangci-lint:v1.52.2"
 DISTROLESS_IMAGE = "gcr.io/distroless/static:nonroot"
-IMAGE_TAG_BASE ?= "ghcr.io/dntosas/${PROJECT}"
+IMAGE_TAG_BASE ?= "quay.io/wolfgangntnx/${PROJECT}"
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.26.1
