@@ -124,7 +124,6 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 		log.Error(err, "Failed to unmarshal CapiCluster")
 		return ctrl.Result{}, err
 	}
-	log.Info("Using remote Endpoint ", "ArgoEndpoint", ArgoEndpoint)
 
 	argoCluster := NewArgoCluster(capiCluster, &capiSecret)
 
@@ -143,7 +142,6 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	}
 	getreq.Header.Set("Content-Type", "application/json; charset=utf-8")
 	getreq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
-
 
 	client := &http.Client{}
 	resp, err := client.Do(getreq)
@@ -203,7 +201,6 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
 
-
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -211,8 +208,6 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 			return ctrl.Result{}, err
 		}
 		defer resp.Body.Close()
-
-		log.Info("Response status","response", resp.Status)
 
 		log.Info("Created new ArgoSecret")
 		return ctrl.Result{}, nil

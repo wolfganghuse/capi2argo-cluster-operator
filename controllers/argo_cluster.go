@@ -15,7 +15,6 @@ var (
 	// ArgoNamespace represents the Namespace that hold ArgoCluster secrets.
 	ArgoNamespace string
 	ArgoEndpoint string
-	ArgoRemote bool
 	authToken string
 )
 
