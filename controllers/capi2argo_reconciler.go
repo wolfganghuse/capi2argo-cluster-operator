@@ -3,7 +3,7 @@ package controllers
 import (
 	"bytes"
 	"context"
-	goErr "errors"
+	//goErr "errors"
 	"os"
 	"strconv"
 	"net/http"
@@ -81,26 +81,12 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 
 			apiurl := fmt.Sprintf("https://%s/api/v1/clusters/%s?id.type=name",ArgoEndpoint, req.NamespacedName.Namespace)
 
-			req, err := http.NewRequest("DELETE", apiurl, nil)
+			_, err:= sendRequest (r.HttpClient, "DELETE", apiurl, authToken, nil)
 			if err != nil {
-				log.Error(err, "Error on deleting request object: ")
+				log.Error(err, "Error on reconcile/delete")
 				return ctrl.Result{}, err
 			}
-			req.Header.Set("Content-Type", "application/json; charset=utf-8")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
-	
-			client := &http.Client{}
-			resp, err := client.Do(req)
-			if err != nil {
-				log.Error(err, "Error on dispatching request")
-				return ctrl.Result{}, err
-			}
-			defer resp.Body.Close()
-	
-			if resp.Status != "200 OK" {
-				log.Error(goErr.New("Error while updating"),"Error while updating")
-				return ctrl.Result{}, err
-			}
+
 			log.Info("Deleted successfully of ArgoSecret")
 			return ctrl.Result{}, nil
 		}
@@ -135,28 +121,7 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	
 	// Check if ArgoCluster already exists via API.
 	apiurl := fmt.Sprintf("https://%s/api/v1/clusters",ArgoEndpoint)
-
-	getreq, err := http.NewRequest("GET", apiurl, nil)
-	if err != nil {
-		log.Error(err, "Error on creating request object: ")
-		return ctrl.Result{}, err
-	}
-	getreq.Header.Set("Content-Type", "application/json; charset=utf-8")
-	getreq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
-
-	client := &http.Client{}
-	resp, err := client.Do(getreq)
-	if err != nil {
-		log.Error(err, "Error on dispatching request")
-		return ctrl.Result{}, err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Error(err, "Error reading response body: ")
-		return ctrl.Result{}, err
-	}
+	bodyBytes, err:= sendRequest (r.HttpClient, "GET", apiurl, authToken, nil)
 
 	exists:= false
 	var clusterList ClusterList
@@ -193,22 +158,12 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 			log.Error(err, "Error on marshalling")
 			return ctrl.Result{}, err
 		}
-	
-		req, err := http.NewRequest("POST", apiurl, bytes.NewBuffer(jsonData))
+		apiurl = fmt.Sprintf("https://%s/api/v1/clusters",ArgoEndpoint)
+		_, err = sendRequest (r.HttpClient, "POST", apiurl, authToken, jsonData)
 		if err != nil {
-			log.Error(err, "Error on creating request object: ")
+			log.Error(err, "Error on creating Cluster")
 			return ctrl.Result{}, err
 		}
-		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
-
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Error(err, "Error on dispatching request")
-			return ctrl.Result{}, err
-		}
-		defer resp.Body.Close()
 
 		log.Info("Created new ArgoSecret")
 		return ctrl.Result{}, nil
@@ -236,27 +191,13 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 				log.Error(err, "Error on marshalling")
 				return ctrl.Result{}, err
 			}
-		
-			req, err := http.NewRequest("PUT", apiurl, bytes.NewBuffer(jsonData))
+
+			_, err = sendRequest (r.HttpClient, "PUT", apiurl, authToken, jsonData)
 			if err != nil {
-				log.Error(err, "Error on creating request object: ")
+				log.Error(err, "Error on Updating")
 				return ctrl.Result{}, err
 			}
-			req.Header.Set("Content-Type", "application/json; charset=utf-8")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
-	
-	
-			client := &http.Client{}
-			resp, err := client.Do(req)
-			if err != nil {
-				log.Error(err, "Error on dispatching request")
-				return ctrl.Result{}, err
-			}
-			defer resp.Body.Close()
-	
-			if resp.Status != "200 OK" {
-				log.Error(goErr.New("Error while updating"),"Error while updating")
-			}
+
 			log.Info("Updated successfully of ArgoSecret")
 			return ctrl.Result{}, nil
 
@@ -272,6 +213,7 @@ func (r *Capi2Argo) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&corev1.Secret{}).Complete(r)
 }
 
+// sendRequest
 func sendRequest(client *http.Client, method, url, authToken string, data []byte) ([]byte, error) {
 	var req *http.Request
 	var err error
@@ -287,7 +229,8 @@ func sendRequest(client *http.Client, method, url, authToken string, data []byte
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
-
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
