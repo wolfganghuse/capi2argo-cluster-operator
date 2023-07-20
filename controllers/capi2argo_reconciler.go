@@ -49,6 +49,8 @@ type Capi2Argo struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
+	HttpClient *http.Client
+
 }
 
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -132,7 +134,6 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	}
 	
 	// Check if ArgoCluster already exists via API.
-	//url := fmt.Sprintf("https://%s/api/v1/clusters/%s",ArgoEndpoint, url.QueryEscape(argoCluster.ClusterServer))
 	apiurl := fmt.Sprintf("https://%s/api/v1/clusters",ArgoEndpoint)
 
 	getreq, err := http.NewRequest("GET", apiurl, nil)
@@ -271,3 +272,32 @@ func (r *Capi2Argo) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&corev1.Secret{}).Complete(r)
 }
 
+func sendRequest(client *http.Client, method, url, authToken string, data []byte) ([]byte, error) {
+	var req *http.Request
+	var err error
+
+	if data != nil {
+		req, err = http.NewRequest(method, url, bytes.NewBuffer(data))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req, err = http.NewRequest(method, url, nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
+}
