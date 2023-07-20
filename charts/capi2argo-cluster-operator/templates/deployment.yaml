@@ -103,6 +103,16 @@ spec:
             {{- if .Values.extraEnvVars }}
             {{- include "common.tplvalues.render" (dict "value" .Values.extraEnvVars "context" $) | nindent 12 }}
             {{- end }}
+            - name: ARGOCD_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: argo-endpoint
+                  key: endpoint
+            - name: ARGOCD_AUTHTOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: argo-endpoint
+                  key: authtoken
           ports:
             - name: http
               containerPort: {{ .Values.containerPorts.http }}

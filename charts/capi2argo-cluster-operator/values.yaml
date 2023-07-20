@@ -10,13 +10,14 @@ commonAnnotations: {}
 replicaCount: 1
 
 image:
-  registry: ghcr.io
-  repository: dntosas/capi2argo-cluster-operator
+  registry: quay.io
+  repository: wolfgangntnx/capi2argo-cluster-operator
   tag: v0.1.13
   pullPolicy: Always
   pullSecrets: []
 
-argoCDNamespace: "argocd"
+argoCDEndpoint: "argocd.edge-management.dachlab.net"
+argoCDAuthtoken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhcmdvY2QiLCJzdWIiOiJhcGlhZG1pbjphcGlLZXkiLCJuYmYiOjE2ODk2ODg5MjIsImlhdCI6MTY4OTY4ODkyMiwianRpIjoiZjViZjc1ZmMtNjBjMC00ODgxLWE4NDYtNjY5MTNmNmE2YTRlIn0.yo-vB6zJMfZX-J91gFrDwZv4eAxZB2egUy2WjBz4Qvo"
 namespacedNamesEnabled: false
 garbageCollectionEnabled: true
 
