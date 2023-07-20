@@ -4,12 +4,10 @@ package controllers
 
 import (
 	b64 "encoding/base64"
-	"encoding/json"
 	"errors"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -18,6 +16,7 @@ var (
 	ArgoNamespace string
 	ArgoEndpoint string
 	ArgoRemote bool
+	authToken string
 )
 
 // GetArgoCommonLabels holds a map of labels that reconciled objects must have.
@@ -29,13 +28,19 @@ func GetArgoCommonLabels() map[string]string {
 }
 
 // ArgoCluster holds all information needed for CAPI --> Argo Cluster conversion
+
+type ClusterList struct {
+	Clusters		[]ArgoCluster `json:"items"`
+}
+
 type ArgoCluster struct {
 	NamespacedName types.NamespacedName
-	ClusterName    string
-	ClusterServer  string
-	ClusterLabels  map[string]string
-	ClusterConfig  ArgoConfig
+	ClusterName    string `json:"name"`
+	ClusterServer  string `json:"server"`
+	ClusterLabels  map[string]string `json:"labels"`
+	ClusterConfig  ArgoConfig `json:"config"`
 }
+
 
 // ArgoConfig represents Argo Cluster.JSON.config
 type ArgoConfig struct {
@@ -84,43 +89,6 @@ func BuildClusterName(s string, namespace string) string {
 		prefix += namespace + "-"
 	}
 	return prefix + s
-}
-
-// ConvertToSecret converts an ArgoCluster into k8s native secret object.
-func (a *ArgoCluster) ConvertToSecret() (*corev1.Secret, error) {
-	if err := ValidateClusterTLSConfig(&a.ClusterConfig.TLSClientConfig); err != nil {
-		return nil, err
-	}
-	c, err := json.Marshal(a.ClusterConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	mergedLabels := make(map[string]string)
-	for key, value := range GetArgoCommonLabels() {
-		mergedLabels[key] = value
-	}
-	for key, value := range a.ClusterLabels {
-		mergedLabels[key] = value
-	}
-
-	argoSecret := &corev1.Secret{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Secret",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      a.NamespacedName.Name,
-			Namespace: a.NamespacedName.Namespace,
-			Labels:    mergedLabels,
-		},
-		Data: map[string][]byte{
-			"name":   []byte(a.ClusterName),
-			"server": []byte(a.ClusterServer),
-			"config": c,
-		},
-	}
-	return argoSecret, nil
 }
 
 // ValidateClusterTLSConfig validates that we got proper based64 k/v fields.

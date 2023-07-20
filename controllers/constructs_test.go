@@ -94,12 +94,6 @@ func MockArgoCluster(validMock bool) *ArgoCluster {
 	return a
 }
 
-func MockArgoSecret() *corev1.Secret {
-	a := MockArgoCluster(true)
-	s, _ := a.ConvertToSecret()
-	return s
-}
-
 // IsBase64 returns true if given value is valid b64-encoded stream
 func IsBase64(s string) bool {
 	_, err := b64.StdEncoding.DecodeString(s)

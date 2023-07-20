@@ -6,10 +6,16 @@ import (
 	goErr "errors"
 	"os"
 	"strconv"
+	"net/http"
+	"net/url"
+	
+	"fmt"
+	"encoding/json"
+	"io/ioutil"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	//"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,16 +34,10 @@ var (
 func init() {
 	// Dummy configuration init.
 	// TODO: Handle this as part of root config.
-
+	authToken = os.Getenv("ARGOCD_AUTHTOKEN")
 	ArgoEndpoint = os.Getenv("ARGOCD_ENDPOINT")
 	if ArgoEndpoint == "" {
-		ArgoRemote = false
-		ArgoNamespace = os.Getenv("ARGOCD_NAMESPACE")
-		if ArgoNamespace == "" {
-			ArgoNamespace = "argocd"
-		}
-	} else {
-		ArgoRemote = true
+		ArgoEndpoint = "argocd-server.argocd.svc.cluster.local"
 	}
 
 	EnableGarbageCollection, _ = strconv.ParseBool(os.Getenv("ENABLE_GARBAGE_COLLECTION"))
@@ -76,19 +76,27 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 
 		// If secret is deleted and GC is enabled, mark ArgoSecret for deletion.
 		if EnableGarbageCollection {
-			labelSelector := map[string]string{
-				"capi-to-argocd/cluster-secret-name": req.NamespacedName.Name,
-				"capi-to-argocd/cluster-namespace":   req.NamespacedName.Namespace,
-			}
-			listOption := client.MatchingLabels(labelSelector)
-			secretList := &corev1.SecretList{}
-			err = r.List(context.Background(), secretList, listOption)
+
+			apiurl := fmt.Sprintf("https://%s/api/v1/clusters/%s?id.type=name",ArgoEndpoint, req.NamespacedName.Namespace)
+
+			req, err := http.NewRequest("DELETE", apiurl, nil)
 			if err != nil {
-				log.Error(err, "Failed to list Cluster Secrets")
+				log.Error(err, "Error on deleting request object: ")
 				return ctrl.Result{}, err
 			}
-			if err := r.Delete(ctx, &secretList.Items[0]); err != nil {
-				log.Error(err, "Failed to delete ArgoSecret")
+			req.Header.Set("Content-Type", "application/json; charset=utf-8")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
+	
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Error(err, "Error on dispatching request")
+				return ctrl.Result{}, err
+			}
+			defer resp.Body.Close()
+	
+			if resp.Status != "200 OK" {
+				log.Error(goErr.New("Error while updating"),"Error while updating")
 				return ctrl.Result{}, err
 			}
 			log.Info("Deleted successfully of ArgoSecret")
@@ -116,95 +124,150 @@ func (r *Capi2Argo) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 		log.Error(err, "Failed to unmarshal CapiCluster")
 		return ctrl.Result{}, err
 	}
-	if ArgoRemote {
-		log.Info("Using remote Endpoint ", "ArgoEndpoint", ArgoEndpoint)
-		log.Info("more to come...")
-		
-	} else { 
-		// Construct ArgoCluster from CapiCluster and CapiSecret.Metadata.
-		argoCluster := NewArgoCluster(capiCluster, &capiSecret)
+	log.Info("Using remote Endpoint ", "ArgoEndpoint", ArgoEndpoint)
 
-		// Convert ArgoCluster into ArgoSecret to work natively on k8s objects.
-		log = r.Log.WithValues("cluster", argoCluster.NamespacedName)
-		log.Info ("Using local ArgoCD Instance")
-		argoSecret, err := argoCluster.ConvertToSecret()
-		if err != nil {
-			log.Error(err, "Failed to convert ArgoCluster to ArgoSecret")
-			return ctrl.Result{}, err
-		}
+	argoCluster := NewArgoCluster(capiCluster, &capiSecret)
 
-		// Represent a possible existing ArgoSecret.
-		var existingSecret corev1.Secret
-		var exists bool
+	for key, value := range GetArgoCommonLabels() {
+		argoCluster.ClusterLabels[key] = value
+	}
+	
+	// Check if ArgoCluster already exists via API.
+	//url := fmt.Sprintf("https://%s/api/v1/clusters/%s",ArgoEndpoint, url.QueryEscape(argoCluster.ClusterServer))
+	apiurl := fmt.Sprintf("https://%s/api/v1/clusters",ArgoEndpoint)
 
-		// Check if ArgoSecret exists.
-		err = r.Get(ctx, argoCluster.NamespacedName, &existingSecret)
-		if errors.IsNotFound(err) {
-			exists = false
-			log.Info("ArgoSecret does not exists, creating..")
-		} else if err == nil {
-			exists = true
-			log.Info("ArgoSecret exists, checking state..")
-		} else {
-			log.Error(err, "Failed to fetch ArgoSecret to check if exists")
-			return ctrl.Result{}, err
-		}
+	getreq, err := http.NewRequest("GET", apiurl, nil)
+	if err != nil {
+		log.Error(err, "Error on creating request object: ")
+		return ctrl.Result{}, err
+	}
+	getreq.Header.Set("Content-Type", "application/json; charset=utf-8")
+	getreq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
 
-		// Reconcile ArgoSecret:
-		// - If does not exists:
-		//     1) Create it.
-		// - If exists:
-		//     1) Parse labels and check if it is meant to be managed by the controller.
-		//     2) If it is controller-managed, check if updates needed and apply them.
-		switch exists {
-		case false:
-			if err := r.Create(ctx, argoSecret); err != nil {
-				log.Error(err, "Failed to create ArgoSecret")
-				return ctrl.Result{}, err
+
+	client := &http.Client{}
+	resp, err := client.Do(getreq)
+	if err != nil {
+		log.Error(err, "Error on dispatching request")
+		return ctrl.Result{}, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Error(err, "Error reading response body: ")
+		return ctrl.Result{}, err
+	}
+
+	exists:= false
+	var clusterList ClusterList
+	var existingCluster ArgoCluster
+
+	if err = json.Unmarshal(bodyBytes, &clusterList); err != nil {
+		log.Error(err, "Error decoding JSON response")
+		return ctrl.Result{}, err
+	}
+	// Iterate over the payloads
+	for _, cluster := range clusterList.Clusters {
+		if cluster.ClusterServer == argoCluster.ClusterServer {
+			if cluster.ClusterLabels["capi-to-argocd/owned"] == "true" {
+				exists = true
+				existingCluster = cluster
 			}
-			log.Info("Created new ArgoSecret")
-			return ctrl.Result{}, nil
-
-		case true:
-
-			log.Info("Checking if ArgoSecret is managed by the Controller")
-			err := ValidateObjectOwner(existingSecret)
-			if err != nil {
-				log.Info("Not managed by Controller, skipping..")
-				return ctrl.Result{}, nil
-			}
-
-			log.Info("Checking if ArgoSecret is out-of-sync with")
-			changed := false
-			if !bytes.Equal(existingSecret.Data["name"], []byte(argoCluster.ClusterName)) {
-				existingSecret.Data["name"] = []byte(argoCluster.ClusterName)
-				changed = true
-			}
-
-			if !bytes.Equal(existingSecret.Data["server"], []byte(argoCluster.ClusterServer)) {
-				existingSecret.Data["server"] = []byte(argoCluster.ClusterServer)
-				changed = true
-			}
-
-			if !bytes.Equal(existingSecret.Data["config"], []byte(argoSecret.Data["config"])) {
-				existingSecret.Data["config"] = []byte(argoSecret.Data["config"])
-				changed = true
-			}
-
-			if changed {
-				log.Info("Updating out-of-sync ArgoSecret")
-				if err := r.Update(ctx, &existingSecret); err != nil {
-					log.Error(err, "Failed to update ArgoSecret")
-					return ctrl.Result{}, err
-				}
-				log.Info("Updated successfully of ArgoSecret")
-				return ctrl.Result{}, nil
-			}
-
-			log.Info("ArgoSecret is in-sync with CapiCluster, skipping..")
-			return ctrl.Result{}, nil
 		}
 	}
+	
+	// Reconcile ArgoCluster:
+	// - If does not exists:
+	//     1) Create it.
+	// - If exists:
+	//     1) Parse labels and check if it is meant to be managed by the controller.
+	//     2) If it is controller-managed, check if updates needed and apply them.
+	switch exists {
+	case false:
+		// Create Cluster via API
+
+		apiurl := fmt.Sprintf("https://%s/api/v1/clusters",ArgoEndpoint)
+
+		jsonData, err := json.Marshal(argoCluster)
+		if err != nil {
+			log.Error(err, "Error on marshalling")
+			return ctrl.Result{}, err
+		}
+	
+		req, err := http.NewRequest("POST", apiurl, bytes.NewBuffer(jsonData))
+		if err != nil {
+			log.Error(err, "Error on creating request object: ")
+			return ctrl.Result{}, err
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
+
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Error(err, "Error on dispatching request")
+			return ctrl.Result{}, err
+		}
+		defer resp.Body.Close()
+
+		log.Info("Response status","response", resp.Status)
+
+		log.Info("Created new ArgoSecret")
+		return ctrl.Result{}, nil
+	case true:
+		log.Info("Checking if ArgoSecret is out-of-sync with")
+		changed := false
+		if existingCluster.ClusterName != argoCluster.ClusterName {
+			existingCluster.ClusterName = argoCluster.ClusterName
+			changed = true
+		}
+		if existingCluster.ClusterConfig.TLSClientConfig.CaData != argoCluster.ClusterConfig.TLSClientConfig.CaData {
+			existingCluster.ClusterConfig.TLSClientConfig.CaData = argoCluster.ClusterConfig.TLSClientConfig.CaData
+			changed = true
+		}
+		if existingCluster.ClusterConfig.TLSClientConfig.CertData != argoCluster.ClusterConfig.TLSClientConfig.CertData {
+			existingCluster.ClusterConfig.TLSClientConfig.CertData = argoCluster.ClusterConfig.TLSClientConfig.CertData
+			changed = true
+		}
+		if changed {
+			log.Info("Updating out-of-sync ArgoSecret")
+			apiurl := fmt.Sprintf("https://%s/api/v1/clusters/%s",ArgoEndpoint, url.QueryEscape(existingCluster.ClusterServer))
+
+			jsonData, err := json.Marshal(existingCluster)
+			if err != nil {
+				log.Error(err, "Error on marshalling")
+				return ctrl.Result{}, err
+			}
+		
+			req, err := http.NewRequest("PUT", apiurl, bytes.NewBuffer(jsonData))
+			if err != nil {
+				log.Error(err, "Error on creating request object: ")
+				return ctrl.Result{}, err
+			}
+			req.Header.Set("Content-Type", "application/json; charset=utf-8")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", authToken))
+	
+	
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Error(err, "Error on dispatching request")
+				return ctrl.Result{}, err
+			}
+			defer resp.Body.Close()
+	
+			if resp.Status != "200 OK" {
+				log.Error(goErr.New("Error while updating"),"Error while updating")
+			}
+			log.Info("Updated successfully of ArgoSecret")
+			return ctrl.Result{}, nil
+
+		}
+
+	}
+	
 	return ctrl.Result{}, nil
 }
 
@@ -213,10 +276,3 @@ func (r *Capi2Argo) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&corev1.Secret{}).Complete(r)
 }
 
-// ValidateObjectOwner checks whether reconciled object is managed by CACO or not.
-func ValidateObjectOwner(s corev1.Secret) error {
-	if s.ObjectMeta.Labels["capi-to-argocd/owned"] != "true" {
-		return goErr.New("not owned by CACO")
-	}
-	return nil
-}
