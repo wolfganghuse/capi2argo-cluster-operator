@@ -21,6 +21,7 @@ import (
 	"flag"
 	"os"
 	"time"
+	"net/http"
 
 	"github.com/dntosas/capi2argo-cluster-operator/controllers"
 
@@ -100,6 +101,7 @@ func main() {
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("capi2argo"),
 		Scheme: mgr.GetScheme(),
+		HttpClient: &http.Client{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Capi2Argo")
 		os.Exit(1)
